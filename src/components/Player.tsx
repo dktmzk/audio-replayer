@@ -40,6 +40,7 @@ const Player: React.FC<PlayerProps> = ({
   
   // Track Loop: How many times the FULL track has played
   const [currentLoop, setCurrentLoop] = useState(0); 
+  const [isLoopLocked, setIsLoopLocked] = useState(false);
   
   // Region Loop: How many times the CURRENT REGION has played
   const [regionLoop, setRegionLoop] = useState(0);
@@ -130,6 +131,7 @@ const Player: React.FC<PlayerProps> = ({
   useEffect(() => {
     setCurrentLoop(0);
     setRegionLoop(0);
+    setIsLoopLocked(false);
     if (regionsPluginRef.current) {
         regionsPluginRef.current.clearRegions();
         setActiveRegion(null);
@@ -190,6 +192,14 @@ const Player: React.FC<PlayerProps> = ({
   const handleAudioEnded = () => {
       // Only handle if NOT in a region (Region Plugin handles that case)
       if (!activeRegion) {
+        if (isLoopLocked) {
+             if (audioRef.current) {
+              audioRef.current.currentTime = 0;
+              audioRef.current.play();
+             }
+             return;
+        }
+
         if (currentLoop < loopCount - 1) {
           setCurrentLoop((prev) => prev + 1);
           if (audioRef.current) {
@@ -248,6 +258,11 @@ const Player: React.FC<PlayerProps> = ({
             {activeRegion && (
                 <span className="text-xs bg-blue-600 px-2 py-0.5 rounded text-white animate-pulse">
                     Drill Mode
+                </span>
+            )}
+            {isLoopLocked && !activeRegion && (
+                 <span className="text-xs bg-indigo-500 px-2 py-0.5 rounded text-white flex items-center gap-1">
+                    <Repeat size={10} /> Locked
                 </span>
             )}
         </div>
@@ -329,6 +344,17 @@ const Player: React.FC<PlayerProps> = ({
             title="Next Track"
         >
             <SkipForward size={24} />
+        </button>
+
+         {/* Loop Lock Button */}
+         <button
+            onClick={() => setIsLoopLocked(!isLoopLocked)}
+            className={`p-2 rounded-full transition-all ${
+                isLoopLocked ? 'text-indigo-400 bg-indigo-400/10' : 'text-gray-500 hover:text-gray-300'
+            }`}
+            title="Lock Current Loop"
+        >
+            <Repeat size={20} />
         </button>
 
         {activeRegion && (
