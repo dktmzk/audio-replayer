@@ -86,8 +86,6 @@ const Player: React.FC<PlayerProps> = ({
       };
   }, [isLoopLocked, currentLoop, loopCount, activeRegion, onTrackEnd, isPlaying, playbackSpeeds, regionLoop]);
 
-  // (removed) safeWsPlay helper — not used anymore
-
   // Helper for safe audio element playback
   const safePlay = async () => {
     if (audioRef.current) {
@@ -145,8 +143,6 @@ const Player: React.FC<PlayerProps> = ({
       });
       setActiveRegion(region);
       setRegionLoop(0); // Reset REGION loop count
-      
-      // Region created (log removed)
       
       // If we were playing before, ensure we continue playing
       // The drag-selection might pause playback, so restore it
@@ -235,8 +231,6 @@ const Player: React.FC<PlayerProps> = ({
         
         const { isLoopLocked, currentLoop, loopCount, activeRegion, onTrackEnd: handleTrackEnd } = stateRef.current;
         
-        // finish event fired
-        
         // If we are in a region, the region plugin handles the loop (usually).
         // But if we hit the end of the track while in a region (edge case), ignore this.
         if (activeRegion) {
@@ -246,7 +240,6 @@ const Player: React.FC<PlayerProps> = ({
         }
 
         const shouldLoop = isLoopLocked || currentLoop < loopCount - 1;
-        // shouldLoop decision made
 
         if (shouldLoop) {
             // Calculate next loop index for speed
@@ -259,38 +252,35 @@ const Player: React.FC<PlayerProps> = ({
                 setCurrentLoop(prev => prev + 1);
             }
             
-            // Use setTimeout to break out of the current event loop
-            // This allows the audio element to fully complete its 'ended' state
-            setTimeout(() => {
-                // Restarting playback via WaveSurfer at speed: (value in nextSpeed)
-                // Set playback rate on audio element
+            // Use queueMicrotask to handle loop restart immediately after the current event loop
+            // This avoids browser throttling (1000ms+) in background tabs which causes "double play" or gaps
+            queueMicrotask(() => {
                 const audio = audioRef.current;
                 if (audio) {
+                    audio.pause(); // Ensure we are stopped
                     audio.playbackRate = nextSpeed;
+                    audio.currentTime = 0; // Seek directly on audio element for speed
                 }
+
+                // Sync WaveSurfer and play
                 ws.setTime(0);
                 ws.play().then(() => {
-                    // WaveSurfer play succeeded (log removed)
                     isHandlingFinishRef.current = false;
                 }).catch((err: any) => {
-                    // WaveSurfer play failed, trying audio element directly
                     console.error('[finish] WaveSurfer play failed:', err);
-                    const audio = audioRef.current;
+                    // Fallback to basic audio play
                     if (audio) {
-                        audio.currentTime = 0;
                         audio.play().then(() => {
-                            isHandlingFinishRef.current = false;
-                        }).catch((e: any) => {
-                            isHandlingFinishRef.current = false;
-                            if (e.name !== 'AbortError') {
-                                console.error('[finish] All play attempts failed:', e);
-                            }
+                             isHandlingFinishRef.current = false;
+                        }).catch(e => {
+                             isHandlingFinishRef.current = false;
+                             if (e.name !== 'AbortError') console.error(e);
                         });
                     } else {
                         isHandlingFinishRef.current = false;
                     }
                 });
-            }, 50);
+            });
         } else {
             // Truly finished - keep guard set until we've returned
             // to prevent the double-fire from also calling onTrackEnd
@@ -358,12 +348,9 @@ const Player: React.FC<PlayerProps> = ({
              }
         });
       }
-
-      if (isPlaying) {
-         safePlay();
-      }
+      // Removed the 'else if' block here to prevent double-play race condition
     }
-  }, [currentTrack, currentLoop, wavesurferRef.current]); 
+  }, [currentTrack, currentLoop]); 
 
   // Separate effect for playback rate - this should NOT trigger play/restart
   useEffect(() => {
