@@ -232,6 +232,12 @@ function App() {
     // 1. Capture current track ID
     const currentTrackId = playlist[currentTrackIndex]?.id;
 
+    // Revoke Object URL to free memory
+    const trackToRemove = playlist.find(t => t.id === idToRemove);
+    if (trackToRemove) {
+        URL.revokeObjectURL(trackToRemove.url);
+    }
+
     setPlaylist(prev => {
         const newPlaylist = prev.filter(t => t.id !== idToRemove);
         
