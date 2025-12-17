@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo, useLayoutEffect } from 'react';
 import Player from './components/Player';
 import Playlist from './components/Playlist';
-import { Upload, Settings, Volume2, FileAudio } from 'lucide-react';
+import { Upload, Settings, Volume2, FileAudio, Moon, X, Play } from 'lucide-react'; // Re-added Settings, added Moon, X, Play
 
 interface Track {
   id: string; // Unique identifier for each track
@@ -13,6 +13,10 @@ interface Track {
 function App() {
   const [playlist, setPlaylist] = useState<Track[]>([]);
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false); // Lifted state
+  const [sessionTime, setSessionTime] = useState(0); // Session timer state
+  const [sleepTimerDuration, setSleepTimerDuration] = useState(0); // Sleep timer state (seconds, 0 for off)
+  const [sleepMinutes, setSleepMinutes] = useState(60);
 
   // State for sorting and last played track
   const [sortOrder, setSortOrder] = useState<'recent' | 'added'>('added');
@@ -53,6 +57,38 @@ function App() {
     window.addEventListener('resize', updateHeight);
     return () => window.removeEventListener('resize', updateHeight);
   }, [loopCount, playlist.length]); // Re-measure when content changes
+
+  // Session Timer Logic
+  useEffect(() => {
+      let timer: number;
+      if (isPlaying) {
+          timer = setInterval(() => {
+              setSessionTime(prevTime => prevTime + 1);
+          }, 1000);
+      }
+      return () => {
+          clearInterval(timer);
+      };
+  }, [isPlaying]);
+
+  // Sleep Timer Logic (Countdown)
+  useEffect(() => {
+    let interval: number;
+    if (isPlaying && sleepTimerDuration > 0) {
+      interval = setInterval(() => {
+        setSleepTimerDuration(prev => {
+          if (prev <= 1) {
+            setIsPlaying(false); // Stop playback
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => {
+      clearInterval(interval);
+    };
+  }, [isPlaying, sleepTimerDuration, setIsPlaying]);
 
   // Helper to add to history
   const addToHistory = useCallback((trackId: string) => {
@@ -276,11 +312,20 @@ function App() {
       const selectedTrack = sortedPlaylist[sortedIndex];
       const mainIndex = playlist.findIndex(t => t.id === selectedTrack.id);
       handleTrackSelect(mainIndex);
-  }, [sortedPlaylist, playlist, handleTrackSelect]);
-
-
-  return (
-    <div 
+    }, [sortedPlaylist, playlist, handleTrackSelect]);
+  
+    // Helper to format time from seconds to HH:MM:SS
+    const formatTime = (totalSeconds: number) => {
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+  
+      const pad = (num: number) => String(num).padStart(2, '0');
+      return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+    };
+  
+    return (
+      <div  
       className="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-black text-gray-100 font-sans selection:bg-blue-500/30 relative flex flex-col"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -297,9 +342,12 @@ function App() {
       {/* Header */}
       <header className="p-6 border-b border-white/5 bg-black/20 backdrop-blur-sm sticky top-0 z-10">
           <div className="max-w-6xl mx-auto flex items-center justify-between">
-            <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent flex items-center gap-3">
+            <h1 className="text-2xl font-bold flex items-center gap-3">
                 <Volume2 className="text-indigo-400" /> 
-                Audio Player
+                <span className="bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent">Audio Player</span>
+                <span className="text-sm text-gray-400 ml-4 hidden sm:inline-block">
+                  Session: {formatTime(sessionTime)}
+                </span>
             </h1>
             
             <div className="flex gap-3">
@@ -338,15 +386,17 @@ function App() {
                 onPreviousTrack={handlePreviousTrack}
                 isShuffleOn={isShuffleOn}
                 onToggleShuffle={toggleShuffle}
+                isPlaying={isPlaying} // Pass isPlaying
+                setIsPlaying={setIsPlaying} // Pass setIsPlaying
                 />
             ) : (
-                <div className="bg-white/5 border border-white/10 rounded-2xl p-12 text-center text-gray-500 flex flex-col items-center justify-center min-h-[300px]">
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-12 text-center text-gray-500 flex flex-col items-center justify-center h-[320px]">
                     <Upload size={48} className="mb-4 opacity-50"/>
                     <h3 className="text-xl font-semibold mb-2 text-gray-300">Start Your Session</h3>
                     <p>Add audio files to begin practicing.</p>
                 </div>
             )}
-
+            
             {/* Settings Panel */}
             <div className="bg-white/5 backdrop-blur-sm border border-white/10 p-6 rounded-2xl shadow-lg">
                 <div className="flex items-center gap-2 mb-6 text-gray-300 border-b border-white/5 pb-4">
@@ -357,7 +407,7 @@ function App() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                     {/* Loop Count */}
                     <div>
-                        <label className="block text-xs font-medium text-gray-400 mb-2 uppercase tracking-wider">Loops per Track</label>
+                        <label htmlFor="loop-count" className="block text-xs font-medium text-gray-400 mb-2 uppercase tracking-wider">Loops per Track</label>
                         <select
                             id="loop-count"
                             value={loopCount}
@@ -368,6 +418,55 @@ function App() {
                             <option value={2}>2 Plays (Loop Once)</option>
                             <option value={3}>3 Plays (Loop Twice)</option>
                         </select>
+                    </div>
+
+                    {/* Sleep Timer */}
+                    <div>
+                        <label htmlFor="sleep-timer" className="block text-xs font-medium text-gray-400 mb-2 uppercase tracking-wider flex items-center gap-2">
+                            <Moon size={14} /> Sleep Timer
+                        </label>
+                        {sleepTimerDuration > 0 ? (
+                            <div className="flex items-center justify-between bg-black/30 border border-white/10 p-3 rounded-xl h-[50px]">
+                                <span className="font-mono text-xl text-blue-400 tracking-wider">
+                                    {formatTime(sleepTimerDuration)}
+                                </span>
+                                <button 
+                                    onClick={() => setSleepTimerDuration(0)} 
+                                    className="text-gray-400 hover:text-red-400 transition-colors p-1"
+                                    title="Cancel Timer"
+                                >
+                                    <X size={20} />
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="flex gap-2 h-[50px]">
+                                <div className="relative flex-1">
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        max="180"
+                                        value={sleepMinutes}
+                                        onChange={(e) => setSleepMinutes(Number(e.target.value))}
+                                        className="w-full h-full bg-black/30 border border-white/10 text-white pl-3 pr-8 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/50 text-center no-spin appearance-none"
+                                        placeholder="Min"
+                                    />
+                                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500 pointer-events-none">min</span>
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        const totalSeconds = sleepMinutes * 60;
+                                        if (totalSeconds > 0) {
+                                            setSleepTimerDuration(totalSeconds);
+                                            setIsPlaying(true);
+                                        }
+                                    }}
+                                    className="bg-blue-600 hover:bg-blue-500 text-white p-3 rounded-xl transition-all shadow-lg hover:shadow-blue-500/25 active:scale-95 flex items-center justify-center aspect-square"
+                                    title="Start Timer"
+                                >
+                                    <Play size={20} fill="currentColor" />
+                                </button>
+                            </div>
+                        )}
                     </div>
 
                     {/* Speeds */}
