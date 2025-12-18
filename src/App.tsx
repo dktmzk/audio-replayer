@@ -224,9 +224,23 @@ function App() {
            const currentId = playlist[currentTrackIndex]?.id;
            if (currentId) addToHistory(currentId);
 
+           // Look in history for the previously played track
+           // After adding current to history, history[0] is current, history[1] is previous
+           if (recentHistory.length > 0) {
+               // Find the first track in history that isn't the current one and still exists
+               const previousTrackId = recentHistory.find(id => id !== currentId && playlist.some(t => t.id === id));
+               if (previousTrackId) {
+                   const prevIndex = playlist.findIndex(t => t.id === previousTrackId);
+                   if (prevIndex !== -1) {
+                       setCurrentTrackIndex(prevIndex);
+                       return;
+                   }
+               }
+           }
+           // Fallback to sequential previous if no history
            setCurrentTrackIndex(prev => (prev - 1 + playlist.length) % playlist.length);
       }
-  }, [playlist, currentTrackIndex, addToHistory]);
+  }, [playlist, currentTrackIndex, recentHistory, addToHistory]);
 
   const handleRemoveTrack = useCallback((idToRemove: string) => {
     // 1. Capture current track ID

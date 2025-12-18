@@ -361,6 +361,55 @@ const Player: React.FC<PlayerProps> = ({
   const displayLoop = activeRegion ? regionLoop : currentLoop;
   const displaySpeed = playbackSpeeds[Math.min(currentLoop, loopCount - 1)] || 1.0;
 
+  // Keyboard Shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if focus is on an input element
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable) {
+        return;
+      }
+
+      switch (e.code) {
+        case 'Space':
+          e.preventDefault();
+          setIsPlaying(!isPlaying);
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          handleRewind();
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          handleFastForward();
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          if (audioRef.current) {
+            audioRef.current.volume = Math.min(1, audioRef.current.volume + 0.1);
+          }
+          break;
+        case 'ArrowDown':
+          e.preventDefault();
+          if (audioRef.current) {
+            audioRef.current.volume = Math.max(0, audioRef.current.volume - 0.1);
+          }
+          break;
+        case 'KeyN':
+          e.preventDefault();
+          onNextTrack();
+          break;
+        case 'KeyP':
+          e.preventDefault();
+          onPreviousTrack();
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isPlaying, setIsPlaying, onNextTrack, onPreviousTrack]);
+
   return (
     <div className="bg-white/10 backdrop-blur-md border border-white/20 p-6 rounded-2xl shadow-xl flex flex-col items-center w-full relative h-[320px] justify-center">
       <div className="w-full text-center mb-6">
