@@ -1,35 +1,46 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo, useLayoutEffect } from 'react';
 import Player from './components/Player';
 import Playlist from './components/Playlist';
-import { Upload, Settings, Volume2, FileAudio, Moon, X, Play } from 'lucide-react'; // Re-added Settings, added Moon, X, Play
+import { Upload, Settings, Volume2, FileAudio, Moon, X, Play, Loader2 } from 'lucide-react';
+import { 
+    addTrackToDB, 
+    getPlaylists, 
+    createPlaylist, 
+    deletePlaylist, 
+    getTracksForPlaylist, 
+    deleteTrackFromDB, 
+    updateTrackPriorityInDB,
+    type StoredPlaylist
+} from './db';
 
 interface Track {
-  id: string; // Unique identifier for each track
+  id: string;
   url: string;
   name: string;
   priority: number;
 }
 
 function App() {
-  const [playlist, setPlaylist] = useState<Track[]>([]);
+  const [playlist, setPlaylist] = useState<Track[]>([]); // Current tracks
+  const [playlists, setPlaylists] = useState<StoredPlaylist[]>([]);
+  const [currentPlaylistId, setCurrentPlaylistId] = useState<string | null>(null);
+  
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false); // Lifted state
-  const [sessionTime, setSessionTime] = useState(0); // Session timer state
-  const [sleepTimerDuration, setSleepTimerDuration] = useState(0); // Sleep timer state (seconds, 0 for off)
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [sessionTime, setSessionTime] = useState(0);
+  const [sleepTimerDuration, setSleepTimerDuration] = useState(0);
   const [sleepMinutes, setSleepMinutes] = useState(60);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // State for sorting and last played track
   const [sortOrder, setSortOrder] = useState<'recent' | 'added'>('added');
   const [recentHistory, setRecentHistory] = useState<string[]>([]);
   const [isShuffleOn, setIsShuffleOn] = useState(true);
 
-  // Initialize loopCount from localStorage or default to 2
   const [loopCount, setLoopCount] = useState(() => {
     const saved = localStorage.getItem('loopCount');
     return saved ? Number(saved) : 2;
   });
 
-  // Initialize playbackSpeeds from localStorage or default
   const [playbackSpeeds, setPlaybackSpeeds] = useState<number[]>(() => {
     const saved = localStorage.getItem('playbackSpeeds');
     return saved ? JSON.parse(saved) : [1.0, 1.1, 1.2];
@@ -37,28 +48,87 @@ function App() {
 
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Refs for Height Matching
   const leftColumnRef = useRef<HTMLDivElement>(null);
   const [playlistHeight, setPlaylistHeight] = useState<number | undefined>(undefined);
 
-  // Measure Left Column Height
+  // Initialize App & Load Playlists
+  useEffect(() => {
+      const init = async () => {
+          try {
+              const lists = await getPlaylists();
+              if (lists.length > 0) {
+                  setPlaylists(lists);
+                  // Sort by creation usually, or last accessed?
+                  // For now, simple default.
+                  setCurrentPlaylistId(lists[0].id);
+              } else {
+                  // Fallback if migration failed or fresh DB
+                  const newPl = await createPlaylist("My Playlist");
+                  setPlaylists([newPl]);
+                  setCurrentPlaylistId(newPl.id);
+              }
+          } catch (error) {
+              console.error("Failed to load application data:", error);
+          } finally {
+              setIsLoading(false);
+          }
+      };
+      init();
+  }, []);
+
+  // Load Tracks when Playlist Selection Changes
+  useEffect(() => {
+      if (!currentPlaylistId) return;
+
+      let isMounted = true;
+
+      const loadTracks = async () => {
+          try {
+              // Note: Revoking old URLs here is tricky with async races. 
+              // Ideally we track active URLs in a ref or cleaning up previous effect.
+              // For now, we rely on the fact that if isMounted is true, we are the latest request.
+              if (playlist.length > 0) {
+                 playlist.forEach(t => URL.revokeObjectURL(t.url));
+              }
+
+              const storedTracks = await getTracksForPlaylist(currentPlaylistId);
+              
+              if (!isMounted) return;
+
+              const tracks: Track[] = storedTracks.map(t => ({
+                  id: t.id,
+                  url: URL.createObjectURL(t.file),
+                  name: t.name,
+                  priority: t.priority
+              }));
+              
+              setPlaylist(tracks);
+              setCurrentTrackIndex(0); 
+              setIsPlaying(false);
+          } catch (e) {
+              if (isMounted) console.error("Failed to load tracks", e);
+          }
+      };
+      loadTracks();
+
+      return () => {
+          isMounted = false;
+      };
+  }, [currentPlaylistId]); // playlist dependency removed to avoid loop, but accessing current value is unsafe inside async.
+  // Actually, accessing `playlist` (state) inside async function uses the closure value from when effect started.
+  // This is "ok" for revocation if we assume we are revoking what was there when we started loading.
+
   useLayoutEffect(() => {
     const updateHeight = () => {
       if (leftColumnRef.current) {
         setPlaylistHeight(leftColumnRef.current.offsetHeight);
       }
     };
-
-    // Update initially and when loopCount changes (as it changes settings height)
     updateHeight();
-    
-    // Add resize listener
     window.addEventListener('resize', updateHeight);
     return () => window.removeEventListener('resize', updateHeight);
-  }, [loopCount, playlist.length]); // Re-measure when content changes
+  }, [loopCount, playlist.length, isLoading]);
 
-  // Session Timer Logic
   useEffect(() => {
       let timer: number;
       if (isPlaying) {
@@ -66,58 +136,121 @@ function App() {
               setSessionTime(prevTime => prevTime + 1);
           }, 1000);
       }
-      return () => {
-          clearInterval(timer);
-      };
+      return () => clearInterval(timer);
   }, [isPlaying]);
 
-  // Sleep Timer Logic (Countdown)
   useEffect(() => {
     let interval: number;
     if (isPlaying && sleepTimerDuration > 0) {
       interval = setInterval(() => {
         setSleepTimerDuration(prev => {
           if (prev <= 1) {
-            setIsPlaying(false); // Stop playback
+            setIsPlaying(false);
             return 0;
           }
           return prev - 1;
         });
       }, 1000);
     }
-    return () => {
-      clearInterval(interval);
-    };
-  }, [isPlaying, sleepTimerDuration, setIsPlaying]);
+    return () => clearInterval(interval);
+  }, [isPlaying, sleepTimerDuration]);
 
-  // Helper to add to history
-  const addToHistory = useCallback((trackId: string) => {
-      setRecentHistory(prev => {
-          const newHistory = [trackId, ...prev.filter(id => id !== trackId)];
-          return newHistory.slice(0, 50); // Keep last 50
-      });
-  }, []);
-
-  // Save loopCount to localStorage whenever it changes
   useEffect(() => {
     localStorage.setItem('loopCount', loopCount.toString());
   }, [loopCount]);
 
-  // Save playbackSpeeds to localStorage whenever it changes
   useEffect(() => {
     localStorage.setItem('playbackSpeeds', JSON.stringify(playbackSpeeds));
   }, [playbackSpeeds]);
 
-  const addFilesToPlaylist = (files: FileList | File[]) => {
-    const newTracks: Track[] = Array.from(files)
-      .filter(file => file.type.startsWith('audio/'))
-      .map(file => ({
-        id: crypto.randomUUID(), // Generate unique ID
-        url: URL.createObjectURL(file),
-        name: file.name,
-        priority: 2, // Default to Medium (2)
-      }));
-    setPlaylist(prev => [...prev, ...newTracks]);
+  const addToHistory = useCallback((trackId: string) => {
+      setRecentHistory(prev => {
+          const newHistory = [trackId, ...prev.filter(id => id !== trackId)];
+          return newHistory.slice(0, 50);
+      });
+  }, []);
+
+  const addFilesToPlaylist = async (files: FileList | File[]) => {
+    if (!currentPlaylistId) return;
+
+    const newFiles = Array.from(files).filter(file => file.type.startsWith('audio/'));
+    
+    const baseTime = Date.now();
+    const newTracks = await Promise.all(newFiles.map(async (file, index): Promise<Track | null> => {
+        const id = crypto.randomUUID();
+        const trackData = {
+            id,
+            playlistId: currentPlaylistId,
+            file,
+            name: file.name,
+            priority: 2,
+            addedAt: baseTime + index
+        };
+        try {
+            await addTrackToDB(trackData);
+            return {
+                id,
+                url: URL.createObjectURL(file),
+                name: file.name,
+                priority: 2
+            };
+        } catch (e: any) {
+            if (e.name === 'QuotaExceededError') {
+                alert(`Storage quota exceeded! Could not save "${file.name}".`);
+                return null;
+            }
+            console.error("Error saving track:", e);
+            return null;
+        }
+    }));
+
+    const successfulTracks = newTracks.filter((t): t is Track => t !== null);
+    setPlaylist(prev => [...prev, ...successfulTracks]);
+  };
+
+  const handleCreatePlaylist = async () => {
+      let name = prompt("Enter playlist name:", "New Playlist");
+      if (name) {
+          name = name.trim();
+          if (!name) return;
+
+          // Auto-rename if duplicate
+          let finalName = name;
+          let counter = 1;
+          while (playlists.some(p => p.name === finalName)) {
+              finalName = `${name} (${counter})`;
+              counter++;
+          }
+
+          try {
+              const newPl = await createPlaylist(finalName);
+              setPlaylists(prev => [...prev, newPl]);
+              setCurrentPlaylistId(newPl.id);
+          } catch (e) {
+              alert("Failed to create playlist");
+          }
+      }
+  };
+
+  const handleDeletePlaylist = async () => {
+      if (!currentPlaylistId) return;
+      
+      if (playlists.length <= 1) {
+          alert("You must have at least one playlist.");
+          return;
+      }
+
+      if (confirm("Are you sure you want to delete this playlist and all its tracks?")) {
+           const idToDelete = currentPlaylistId;
+           // Find next playlist to select
+           const currentIndex = playlists.findIndex(p => p.id === idToDelete);
+           const nextPlaylist = playlists[currentIndex === 0 ? 1 : currentIndex - 1];
+           
+           await deletePlaylist(idToDelete);
+           
+           setPlaylists(prev => prev.filter(p => p.id !== idToDelete));
+           setCurrentPlaylistId(nextPlaylist.id);
+      }
   };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -146,15 +279,12 @@ function App() {
     }
   }, []);
 
-  // Helper to pick next track based on weights
   const pickNextWeightedTrack = useCallback((currentId: string | null) => {
       if (playlist.length === 0) return 0;
       if (playlist.length === 1) return 0;
 
-      // Filter out current track to avoid immediate repeat (unless only 1 track)
       const candidates = playlist.filter(t => t.id !== currentId);
       
-      // Calculate total weight
       const getWeight = (p: number) => {
           switch(p) {
               case 3: return 9;
@@ -167,7 +297,6 @@ function App() {
       const totalWeight = candidates.reduce((sum, track) => sum + getWeight(track.priority), 0);
       let randomValue = Math.random() * totalWeight;
       
-      // Select track
       let selectedTrack = candidates[0];
       for (const track of candidates) {
           randomValue -= getWeight(track.priority);
@@ -176,11 +305,8 @@ function App() {
               break;
           }
       }
-
-      // Return the index of the selected track in the MAIN playlist
       return playlist.findIndex(t => t.id === selectedTrack.id);
   }, [playlist]);
-
 
   const handleTrackEnd = useCallback(() => {
     if (playlist.length === 0) return;
@@ -192,16 +318,13 @@ function App() {
         const nextIndex = pickNextWeightedTrack(currentId);
         setCurrentTrackIndex(nextIndex);
     } else {
-        // Sequential order (wrapping)
         setCurrentTrackIndex(prevIndex => (prevIndex + 1) % playlist.length);
     }
   }, [playlist, currentTrackIndex, isShuffleOn, pickNextWeightedTrack, addToHistory]);
 
   const handleTrackSelect = useCallback((index: number) => {
-    // Record current track
     const trackId = playlist[index]?.id;
     if (trackId) addToHistory(trackId);
-    
     setCurrentTrackIndex(index);
   }, [playlist, addToHistory]);
   
@@ -224,10 +347,7 @@ function App() {
            const currentId = playlist[currentTrackIndex]?.id;
            if (currentId) addToHistory(currentId);
 
-           // Look in history for the previously played track
-           // After adding current to history, history[0] is current, history[1] is previous
            if (recentHistory.length > 0) {
-               // Find the first track in history that isn't the current one and still exists
                const previousTrackId = recentHistory.find(id => id !== currentId && playlist.some(t => t.id === id));
                if (previousTrackId) {
                    const prevIndex = playlist.findIndex(t => t.id === previousTrackId);
@@ -237,16 +357,15 @@ function App() {
                    }
                }
            }
-           // Fallback to sequential previous if no history
            setCurrentTrackIndex(prev => (prev - 1 + playlist.length) % playlist.length);
       }
   }, [playlist, currentTrackIndex, recentHistory, addToHistory]);
 
   const handleRemoveTrack = useCallback((idToRemove: string) => {
-    // 1. Capture current track ID
     const currentTrackId = playlist[currentTrackIndex]?.id;
+    
+    deleteTrackFromDB(idToRemove).catch(console.error);
 
-    // Revoke Object URL to free memory
     const trackToRemove = playlist.find(t => t.id === idToRemove);
     if (trackToRemove) {
         URL.revokeObjectURL(trackToRemove.url);
@@ -255,20 +374,14 @@ function App() {
     setPlaylist(prev => {
         const newPlaylist = prev.filter(t => t.id !== idToRemove);
         
-        // 2. If we removed the currently playing track
         if (idToRemove === currentTrackId) {
             if (newPlaylist.length === 0) {
                 setCurrentTrackIndex(0);
             } else {
-                // Determine new index (try to stay at same visual position, or go to 0)
-                // If we were at index 5, and it's gone, index 5 is now the next song.
-                // We just need to clamp it.
                 setCurrentTrackIndex(prevIndex => Math.min(prevIndex, newPlaylist.length - 1));
             }
         } 
-        // 3. If we removed a DIFFERENT track
         else {
-            // Find where our playing track moved to
             const newIndex = newPlaylist.findIndex(t => t.id === currentTrackId);
             if (newIndex !== -1) {
                 setCurrentTrackIndex(newIndex);
@@ -279,6 +392,8 @@ function App() {
   }, [playlist, currentTrackIndex]);
 
   const handlePriorityChange = useCallback((id: string, newPriority: number) => {
+      updateTrackPriorityInDB(id, newPriority).catch(console.error);
+
       setPlaylist(prev => {
           return prev.map(track => 
               track.id === id ? { ...track, priority: newPriority } : track
@@ -302,48 +417,47 @@ function App() {
       setIsShuffleOn(prev => !prev);
   }, []);
 
-  // Memoized sorted playlist for rendering
   const sortedPlaylist = useMemo(() => {
     if (sortOrder === 'recent' && recentHistory.length > 0) {
-      // Create a map for O(1) history lookup
       const historyMap = new Map(recentHistory.map((id, index) => [id, index]));
-      
-      // Sort the playlist: history tracks first, in order of recency, then other tracks
       const sorted = [...playlist].sort((a, b) => {
           const indexA = historyMap.has(a.id) ? historyMap.get(a.id)! : Infinity;
           const indexB = historyMap.has(b.id) ? historyMap.get(b.id)! : Infinity;
-          
-          return indexA - indexB; // Lower index (more recent) comes first
+          return indexA - indexB; 
       });
       return sorted;
     }
-    return playlist; // Default 'added' order
+    return playlist;
   }, [playlist, sortOrder, recentHistory]);
 
-  // Adjust currentTrackIndex based on the sorted view for the Playlist component highlighting
   const currentTrackIndexInSorted = useMemo(() => {
     const currentTrack = playlist[currentTrackIndex];
     if (!currentTrack) return 0;
     return sortedPlaylist.findIndex(track => track.id === currentTrack.id);
   }, [playlist, currentTrackIndex, sortedPlaylist]);
 
-  // When selecting from Sorted Playlist, we get an index in the SORTED list.
   const handleSortedTrackSelect = useCallback((sortedIndex: number) => {
       const selectedTrack = sortedPlaylist[sortedIndex];
       const mainIndex = playlist.findIndex(t => t.id === selectedTrack.id);
       handleTrackSelect(mainIndex);
     }, [sortedPlaylist, playlist, handleTrackSelect]);
   
-    // Helper to format time from seconds to HH:MM:SS
     const formatTime = (totalSeconds: number) => {
       const hours = Math.floor(totalSeconds / 3600);
       const minutes = Math.floor((totalSeconds % 3600) / 60);
       const seconds = totalSeconds % 60;
-  
       const pad = (num: number) => String(num).padStart(2, '0');
       return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
     };
   
+    if (isLoading) {
+        return (
+            <div className="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-black flex items-center justify-center text-white">
+                <Loader2 size={48} className="animate-spin text-blue-500" />
+            </div>
+        );
+    }
+
     return (
       <div  
       className="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-black text-gray-100 font-sans selection:bg-blue-500/30 relative flex flex-col"
@@ -351,7 +465,6 @@ function App() {
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {/* Drag Overlay */}
       {isDragging && (
         <div className="absolute inset-0 z-50 bg-blue-600/20 backdrop-blur-sm border-4 border-blue-500 border-dashed m-4 rounded-3xl flex flex-col items-center justify-center pointer-events-none">
           <FileAudio size={80} className="text-blue-400 mb-4 animate-bounce" />
@@ -359,7 +472,6 @@ function App() {
         </div>
       )}
 
-      {/* Header */}
       <header className="p-6 border-b border-white/5 bg-black/20 backdrop-blur-sm sticky top-0 z-10">
           <div className="max-w-6xl mx-auto flex items-center justify-between">
             <h1 className="text-2xl font-bold flex items-center gap-3">
@@ -371,12 +483,6 @@ function App() {
             </h1>
             
             <div className="flex gap-3">
-                <button
-                onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 px-4 rounded-lg transition-all shadow-lg hover:shadow-blue-500/25 active:scale-95 text-sm"
-                >
-                <Upload size={16} /> Add Files
-                </button>
                 <input
                 type="file"
                 accept="audio/*"
@@ -392,9 +498,7 @@ function App() {
       <main className="max-w-6xl mx-auto p-6 md:p-8 w-full flex-grow">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           
-          {/* Left Column: Player & Settings */}
           <div className="lg:col-span-7 flex flex-col space-y-6" ref={leftColumnRef}>
-             {/* Player Card */}
              {playlist.length > 0 ? (
                 <Player
                 playlist={playlist}
@@ -406,8 +510,8 @@ function App() {
                 onPreviousTrack={handlePreviousTrack}
                 isShuffleOn={isShuffleOn}
                 onToggleShuffle={toggleShuffle}
-                isPlaying={isPlaying} // Pass isPlaying
-                setIsPlaying={setIsPlaying} // Pass setIsPlaying
+                isPlaying={isPlaying} 
+                setIsPlaying={setIsPlaying} 
                 />
             ) : (
                 <div className="bg-white/5 border border-white/10 rounded-2xl p-12 text-center text-gray-500 flex flex-col items-center justify-center h-[320px]">
@@ -417,7 +521,6 @@ function App() {
                 </div>
             )}
             
-            {/* Settings Panel */}
             <div className="bg-white/5 backdrop-blur-sm border border-white/10 p-6 rounded-2xl shadow-lg">
                 <div className="flex items-center gap-2 mb-6 text-gray-300 border-b border-white/5 pb-4">
                     <Settings size={20} className="text-indigo-400" />
@@ -425,7 +528,6 @@ function App() {
                 </div>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    {/* Loop Count */}
                     <div>
                         <label htmlFor="loop-count" className="block text-xs font-medium text-gray-400 mb-2 uppercase tracking-wider">Loops per Track</label>
                         <select
@@ -440,7 +542,6 @@ function App() {
                         </select>
                     </div>
 
-                    {/* Sleep Timer */}
                     <div>
                         <label htmlFor="sleep-timer" className="block text-xs font-medium text-gray-400 mb-2 uppercase tracking-wider flex items-center gap-2">
                             <Moon size={14} /> Sleep Timer
@@ -489,7 +590,6 @@ function App() {
                         )}
                     </div>
 
-                    {/* Speeds */}
                     <div className="md:col-span-2 space-y-4">
                         <label className="block text-xs font-medium text-gray-400 mb-2 uppercase tracking-wider">Adaptive Speed Control</label>
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -518,7 +618,6 @@ function App() {
             </div>
           </div>
 
-          {/* Right Column: Playlist */}
           <div 
             className="lg:col-span-5 flex flex-col lg:sticky lg:top-24"
             style={{ height: playlistHeight ? `${playlistHeight}px` : 'auto' }}
@@ -531,6 +630,13 @@ function App() {
                 onPriorityChange={handlePriorityChange}
                 sortOrder={sortOrder}
                 setSortOrder={setSortOrder}
+                
+                playlists={playlists}
+                currentPlaylistId={currentPlaylistId}
+                onPlaylistChange={setCurrentPlaylistId}
+                onCreatePlaylist={handleCreatePlaylist}
+                onDeletePlaylist={handleDeletePlaylist}
+                onAddFiles={() => fileInputRef.current?.click()}
             />
           </div>
         </div>

@@ -1,5 +1,6 @@
 import React from 'react';
-import { Trash2, Music, SortAsc, History } from 'lucide-react';
+import { Trash2, Music, SortAsc, History, Plus, ListMusic, Upload } from 'lucide-react';
+import { type StoredPlaylist } from '../db';
 
 interface Track {
   id: string;
@@ -9,16 +10,38 @@ interface Track {
 }
 
 interface PlaylistProps {
-  playlist: Track[]; // This is now the sorted list
-  currentTrackIndex: number; // This is the index in the sorted list
+  playlist: Track[];
+  currentTrackIndex: number;
   onTrackSelect: (index: number) => void;
-  onRemoveTrack: (id: string) => void; // Now takes ID
-  onPriorityChange: (id: string, newPriority: number) => void; // Now takes ID
-  sortOrder: 'recent' | 'added'; // Simplified sort order
+  onRemoveTrack: (id: string) => void;
+  onPriorityChange: (id: string, newPriority: number) => void;
+  sortOrder: 'recent' | 'added';
   setSortOrder: (order: 'recent' | 'added') => void;
+  
+  // New Props for Selector
+  playlists: StoredPlaylist[];
+  currentPlaylistId: string | null;
+  onPlaylistChange: (id: string) => void;
+  onCreatePlaylist: () => void;
+  onDeletePlaylist: () => void;
+  onAddFiles: () => void;
 }
 
-const Playlist: React.FC<PlaylistProps> = ({ playlist, currentTrackIndex, onTrackSelect, onRemoveTrack, onPriorityChange, sortOrder, setSortOrder }) => {
+const Playlist: React.FC<PlaylistProps> = ({ 
+    playlist, 
+    currentTrackIndex, 
+    onTrackSelect, 
+    onRemoveTrack, 
+    onPriorityChange, 
+    sortOrder, 
+    setSortOrder,
+    playlists,
+    currentPlaylistId,
+    onPlaylistChange,
+    onCreatePlaylist,
+    onDeletePlaylist,
+    onAddFiles
+}) => {
   
   const handleSliderClick = (e: React.MouseEvent<HTMLDivElement>, trackId: string) => {
     e.stopPropagation(); // Prevent track selection
@@ -47,31 +70,59 @@ const Playlist: React.FC<PlaylistProps> = ({ playlist, currentTrackIndex, onTrac
   return (
     <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl shadow-xl overflow-hidden flex flex-col h-full">
       <div className="p-4 border-b border-white/10 bg-black/20">
-        <div className="flex items-center justify-between mb-2">
-            <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                <Music size={20} className="text-blue-400"/> Playlist
-            </h2>
-            <span className="text-xs font-normal text-gray-500">{playlist.length} tracks</span>
+        
+        {/* Header with Selector */}
+        <div className="flex items-center justify-between mb-3">
+             <div className="flex items-center gap-2 flex-1 min-w-0 mr-3">
+                <ListMusic className="text-blue-400 flex-shrink-0" size={20} />
+                <select 
+                    value={currentPlaylistId || ''} 
+                    onChange={(e) => onPlaylistChange(e.target.value)}
+                    className="bg-black/30 text-white border border-white/10 rounded-lg p-1.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none w-full font-medium"
+                >
+                    {playlists.map(p => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                </select>
+            </div>
+            <div className="flex gap-1">
+                <button onClick={onCreatePlaylist} title="New Playlist" className="p-2 hover:bg-white/10 rounded-lg text-green-400 transition-colors">
+                    <Plus size={18} />
+                </button>
+                <button onClick={onDeletePlaylist} title="Delete Playlist" className="p-2 hover:bg-white/10 rounded-lg text-red-400 transition-colors">
+                    <Trash2 size={18} />
+                </button>
+            </div>
         </div>
 
-        {/* Sort Order Control - Simplified */}
-        <div className="flex bg-black/30 rounded-lg p-0.5 text-xs">
-            <button
-                onClick={() => setSortOrder('added')}
-                className={`flex-1 px-3 py-1 rounded-md transition-all flex items-center justify-center gap-1 ${
-                    sortOrder === 'added' ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
-                }`}
+        {/* Sub-header: Add & Sort */}
+        <div className="flex items-center gap-3">
+            <button 
+                onClick={onAddFiles}
+                className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-3 py-2 rounded-lg flex items-center gap-2 shadow-lg transition-all active:scale-95 whitespace-nowrap"
             >
-                <SortAsc size={14} /> Added
+                <Upload size={14} /> Add Tracks
             </button>
-            <button
-                onClick={() => setSortOrder('recent')}
-                className={`flex-1 px-3 py-1 rounded-md transition-all flex items-center justify-center gap-1 ${
-                    sortOrder === 'recent' ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
-                }`}
-            >
-                <History size={14} /> Recent
-            </button>
+
+            {/* Sort Order Control */}
+            <div className="flex bg-black/30 rounded-lg p-0.5 text-xs flex-1">
+                <button
+                    onClick={() => setSortOrder('added')}
+                    className={`flex-1 px-3 py-1 rounded-md transition-all flex items-center justify-center gap-1 ${
+                        sortOrder === 'added' ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                    }`}
+                >
+                    <SortAsc size={14} /> Added
+                </button>
+                <button
+                    onClick={() => setSortOrder('recent')}
+                    className={`flex-1 px-3 py-1 rounded-md transition-all flex items-center justify-center gap-1 ${
+                        sortOrder === 'recent' ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                    }`}
+                >
+                    <History size={14} /> Recent
+                </button>
+            </div>
         </div>
       </div>
       
