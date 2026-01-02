@@ -1,7 +1,8 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo, useLayoutEffect } from 'react';
 import Player from './components/Player';
 import Playlist from './components/Playlist';
-import { Upload, Settings, Volume2, FileAudio, Moon, X, Play, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
+import logo from './assets/logo.svg';
+import { Upload, Settings, FileAudio, Moon, X, Play, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 import { 
     addTrackToDB, 
     getPlaylists, 
@@ -476,7 +477,7 @@ function App() {
       <header className="p-6 border-b border-white/5 bg-black/20 backdrop-blur-sm sticky top-0 z-10">
           <div className="max-w-6xl mx-auto flex items-center justify-between">
             <h1 className="text-2xl font-bold flex items-center gap-3">
-                <Volume2 className="text-indigo-400" /> 
+                <img src={logo} alt="Audio Replayer Logo" className="w-8 h-8" />
                 <span className="bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent">Audio Replayer</span>
                 <span className="text-sm text-gray-400 ml-4 hidden sm:inline-block">
                   Session: {formatTime(sessionTime)}
